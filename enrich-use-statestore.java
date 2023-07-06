@@ -1,42 +1,37 @@
-import org.apache.avro.generic.GenericRecord;
-import org.apache.kafka.clients.consumer.ConsumerConfig;
-import org.apache.kafka.common.serialization.Serdes;
-import org.apache.kafka.common.serialization.StringDeserializer;
-import org.apache.kafka.common.serialization.StringSerializer;
-import org.apache.kafka.streams.*;
+import org.apache.kafka.streams.StreamsBuilder;
 import org.apache.kafka.streams.kstream.KStream;
-import org.apache.kafka.streams.kstream.KTable;
-
-import java.util.Properties;
+import org.apache.kafka.streams.kstream.ValueTransformerWithKeySupplier;
 
 public class AvroEnrichmentApplication {
 
     public static void main(String[] args) {
+        // Initialize Kafka Streams configuration
         Properties config = new Properties();
-        config.put(StreamsConfig.APPLICATION_ID_CONFIG, "avro-enrichment-application");
-        config.put(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG, "localhost:9092");
-        config.put(StreamsConfig.DEFAULT_KEY_SERDE_CLASS_CONFIG, Serdes.String().getClass().getName());
-        config.put(StreamsConfig.DEFAULT_VALUE_SERDE_CLASS_CONFIG, AvroSerdesUtils.getGenericAvroSerde().getClass());
-        config.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+        // Set the necessary configuration properties
 
         StreamsBuilder builder = new StreamsBuilder();
 
-        // Read the input stream
-        KStream<String, GenericRecord> inputStream = builder.stream(
+        // Create the input stream
+        KStream<String, TransactionAvro> inputStream = builder.stream(
                 "input-topic",
-                Consumed.with(Serdes.String(), AvroSerdesUtils.getGenericAvroSerde())
+                Consumed.with(Serdes.String(), avroSerde)
         );
 
-        // Enrich the input stream using the external state store
-        KStream<String, GenericRecord> enrichedStream = inputStream.transformValues(
-                ExternalStateStoreEnricher::new,
-                "my-external-state-store"
+        // Repartition the input stream based on the new key
+        KStream<String, TransactionAvro> repartitionedStream = inputStream.selectKey(
+                (key, value) -> value.getIsin() + value.getTradeDate()
+        );
+
+        // Enrich the repartitioned stream using the state store
+        KStream<String, EnrichedTransactionAvro> enrichedStream = repartitionedStream.transformValues(
+                new EnrichmentTransformer("my-state-store"),
+                "my-state-store"
         );
 
         // Write the enriched stream to the output topic
         enrichedStream.to(
                 "output-topic",
-                Produced.with(Serdes.String(), AvroSerdesUtils.getGenericAvroSerde())
+                Produced.with(Serdes.String(), avroSerde)
         );
 
         // Build and start the Kafka Streams application
@@ -44,52 +39,60 @@ public class AvroEnrichmentApplication {
         streams.start();
     }
 
-    public static class ExternalStateStoreEnricher implements ValueTransformerWithKeySupplier<String, GenericRecord, GenericRecord> {
+    // Rest of the code remains the same as before
+}
 
-        private final String stateStoreName;
-        private KeyValueStore<String, GenericRecord> stateStore;
 
-        public ExternalStateStoreEnricher(String stateStoreName) {
-            this.stateStoreName = stateStoreName;
-        }
+ import org.apache.kafka.streams.processor.ProcessorContext;
+import org.apache.kafka.streams.state.KeyValueStore;
+import org.apache.kafka.streams.kstream.ValueTransformerWithKey;
+import org.apache.kafka.streams.kstream.ValueTransformerWithKeySupplier;
 
-        @Override
-        public void init(ProcessorContext context) {
-            // Get the reference to the external state store
-            stateStore = (KeyValueStore<String, GenericRecord>) context.getStateStore(stateStoreName);
-        }
+public class EnrichmentTransformer implements ValueTransformerWithKeySupplier<String, TransactionAvro, EnrichedTransactionAvro> {
 
-        @Override
-    public GenericRecord transform(String key, GenericRecord value) {
-        // Perform the enrichment logic using the external state store
+    private final String stateStoreName;
+    private KeyValueStore<String, InstrumentAvro> stateStore;
+    private ProcessorContext context;
 
-        // Get the record from the state store using the key
-        GenericRecord stateRecord = stateStore.get(key);
-
-        if (stateRecord != null) {
-            // Extract the required attributes from the state record
-            String name = stateRecord.get("name").toString();
-            String value = stateRecord.get("value").toString();
-            String country = stateRecord.get("country").toString();
-
-            // Enrich the input record with the attributes from the state record
-            value.put("name", name);
-            value.put("value", value);
-            value.put("country", country);
-        }
-
-        // Return the enriched record
-        return value;
+    public EnrichmentTransformer(String stateStoreName) {
+        this.stateStoreName = stateStoreName;
     }
 
-        @Override
-        public void close() {
-            // Clean up any resources if needed
+    @Override
+    public void init(ProcessorContext context) {
+        this.context = context;
+        this.stateStore = (KeyValueStore<String, InstrumentAvro>) context.getStateStore(stateStoreName);
+    }
+
+    @Override
+    public EnrichedTransactionAvro transform(String key, TransactionAvro transaction) {
+        // Perform the enrichment logic using the state store
+        InstrumentAvro instrument = stateStore.get(key);
+
+        if (instrument != null) {
+            // Create a new EnrichedTransactionAvro by combining the TransactionAvro and InstrumentAvro
+            EnrichedTransactionAvro enrichedTransaction = new EnrichedTransactionAvro();
+            enrichedTransaction.setId(transaction.getId());
+            enrichedTransaction.setAmount(transaction.getAmount());
+            enrichedTransaction.setInstrumentId(instrument.getId());
+            enrichedTransaction.setInstrumentName(instrument.getName());
+            enrichedTransaction.setInstrumentValue(instrument.getValue());
+            enrichedTransaction.setInstrumentCountry(instrument.getCountry());
+
+            return enrichedTransaction;
         }
 
-        @Override
-        public ValueTransformerWithKey<String, GenericRecord, GenericRecord> get() {
-            return this;
-        }
+        // If no matching instrument is found, return null or a default value depending on your requirement
+        return null;
+    }
+
+    @Override
+    public void close() {
+        // Perform any necessary cleanup
+    }
+
+    @Override
+    public ValueTransformerWithKey<String, TransactionAvro, EnrichedTransactionAvro> get() {
+        return this;
     }
 }
