@@ -60,13 +60,27 @@ public class AvroEnrichmentApplication {
         }
 
         @Override
-        public GenericRecord transform(String key, GenericRecord value) {
-            // Perform the enrichment logic using the external state store
-            GenericRecord enrichedRecord = new GenericRecord(); // Implement your logic
+    public GenericRecord transform(String key, GenericRecord value) {
+        // Perform the enrichment logic using the external state store
 
-            // Return the enriched record
-            return enrichedRecord;
+        // Get the record from the state store using the key
+        GenericRecord stateRecord = stateStore.get(key);
+
+        if (stateRecord != null) {
+            // Extract the required attributes from the state record
+            String name = stateRecord.get("name").toString();
+            String value = stateRecord.get("value").toString();
+            String country = stateRecord.get("country").toString();
+
+            // Enrich the input record with the attributes from the state record
+            value.put("name", name);
+            value.put("value", value);
+            value.put("country", country);
         }
+
+        // Return the enriched record
+        return value;
+    }
 
         @Override
         public void close() {
@@ -79,4 +93,3 @@ public class AvroEnrichmentApplication {
         }
     }
 }
-s
