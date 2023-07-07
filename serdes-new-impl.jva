@@ -1,0 +1,51 @@
+public class EnrichmentConfig {
+    public static Properties getConfig() {
+        Properties config = new Properties();
+        config.put(StreamsConfig.APPLICATION_ID_CONFIG, "my-application");
+        config.put(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG, "localhost:9092");
+        config.put(AbstractKafkaAvroSerDeConfig.SCHEMA_REGISTRY_URL_CONFIG, "http://localhost:8081");
+        // Add other necessary configuration properties
+        return config;
+    }
+
+    public static String getInputTopic() {
+        return "input-topic";
+    }
+
+    public static String getOutputTopic() {
+        return "output-topic";
+    }
+}
+public class AvroSerdeConfig {
+    public static SpecificAvroSerde<Transaction> getTransactionAvroSerde(Properties properties) {
+        String schemaRegistryUrl = properties.getProperty(AbstractKafkaAvroSerDeConfig.SCHEMA_REGISTRY_URL_CONFIG);
+        SpecificAvroSerde<Transaction> avroSerde = new SpecificAvroSerde<>();
+        avroSerde.configure(
+                ImmutableMap.of(
+                        AbstractKafkaAvroSerDeConfig.SCHEMA_REGISTRY_URL_CONFIG, schemaRegistryUrl
+                ),
+                false
+        );
+        return avroSerde;
+    }
+}
+public class TopologyBuilder {
+    public static Topology buildTopology(StreamsBuilder builder, String inputTopic, String outputTopic) {
+        // Load the properties file
+        Properties properties = EnrichmentConfig.getConfig();
+
+        // Configure the Avro Serdes
+        SpecificAvroSerde<Transaction> transactionAvroSerde = AvroSerdeConfig.getTransactionAvroSerde(properties);
+        SpecificAvroSerde<EnrichedTransaction> enrichedTransactionAvroSerde = AvroSerdeConfig.getEnrichedTransactionAvroSerde(properties);
+
+        // Define the topology
+        KStream<String, Transaction> inputStream = builder.stream(inputTopic, Consumed.with(Serdes.String(), transactionAvroSerde));
+
+        KStream<String, EnrichedTransaction> enrichedStream = inputStream.transform(Enricher::new);
+
+        enrichedStream.to(outputTopic, Produced.with(Serdes.String(), enrichedTransactionAvroSerde));
+
+        // Build and return the topology
+        return builder.build();
+    }
+}
