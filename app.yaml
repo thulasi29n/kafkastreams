@@ -1,0 +1,24 @@
+spring:
+  kafka:
+    bootstrap-servers: localhost:9092
+    streams:
+      application-id: streams-app
+      bootstrap-servers: localhost:9092
+      default-key-serde: org.apache.kafka.common.serialization.Serdes$StringSerde
+      default-value-serde: org.apache.kafka.common.serialization.Serdes$StringSerde
+      properties:
+        schema.registry.url: http://localhost:8081
+        state.dir: /tmp/kafka-streams-state
+      streams:
+        # Define the input and output topics
+        input-topic: my-input-topic
+        output-topic: my-output-topic
+
+        # Define the state store name
+        state-store-name: my-state-store
+
+        # Define the parked topic for records that fail processing
+        parked-topic: my-parked-topic
+
+        # Define the repartition topic for repartitioning operations
+        repartition-topic: my-repartition-topic
