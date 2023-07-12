@@ -17,8 +17,6 @@ public class StateStoreExample {
 
         StreamsBuilder builder = new StreamsBuilder();
 
-        KTable<String, Instrument> instrumentTable = builder.table("instrument-topic");
-
         StoreBuilder<KeyValueStore<String, Instrument>> instrumentStoreBuilder =
                 Stores.keyValueStoreBuilder(
                         Stores.persistentKeyValueStore("instrument-store"),
@@ -27,6 +25,14 @@ public class StateStoreExample {
                 );
 
         builder.addStateStore(instrumentStoreBuilder);
+
+        KTable<String, Instrument> instrumentTable = builder.table(
+                "instrument-topic",
+                Consumed.with(Serdes.String(), new JsonSerde<>(Instrument.class)),
+                Materialized.<String, Instrument>as("instrument-store")
+                        .withKeySerde(Serdes.String())
+                        .withValueSerde(new JsonSerde<>(Instrument.class))
+        );
 
         KStream<String, Transaction> transactionStream = builder.stream("transaction-topic");
 
